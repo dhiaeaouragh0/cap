@@ -1,16 +1,17 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "DZ GAME ZONE backend",
+  "main": "src/server.js",
+  "type": "module",
   "scripts": {
     "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["gaming", "ecommerce", "dz"],
+  "author": "Dhiaeddine",
   "license": "ISC",
-  "type": "module",
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
