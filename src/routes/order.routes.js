@@ -66,8 +66,9 @@ router.post('/', async (req, res) => {
     const subtotal = unitPrice * quantity;
 
     // Récupérer frais livraison
+    
     const shippingWilaya = await ShippingWilaya.findOne({
-      nom: { $regex: new RegExp('^' + wilaya + ' $$', 'i') }
+      nom: { $regex: new RegExp(wilaya, 'i') }  // partial match, very forgiving
     });
     if (!shippingWilaya) {
       return res.status(400).json({ message: `Wilaya non trouvée : ${wilaya}` });
