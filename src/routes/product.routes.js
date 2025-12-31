@@ -2,6 +2,8 @@
 import express from 'express';
 import Product from '../models/Product.js';
 
+import { uploadImage, uploadToCloudinary , uploadImages ,uploadMultipleToCloudinary} from '../middlewares/upload.js';
+
 const router = express.Router();
 
 // GET /api/products - Liste avec TOUS les filtres possibles
@@ -158,6 +160,41 @@ router.delete('/:id', async (req, res) => {
     res.json({ message: 'Produit supprimé avec succès' });
   } catch (error) {
     res.status(500).json({ message: 'Erreur suppression', error: error.message });
+  }
+});
+
+
+// POST /api/products/upload-image - Uploader une image et récupérer l'URL
+router.post('/upload-image', uploadImage, async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'Aucun fichier reçu (champ "image")' });
+    }
+
+    const url = await uploadToCloudinary(req.file);
+    res.status(200).json({ url });
+  } catch (err) {
+    console.error('Erreur Cloudinary:', err);
+    res.status(500).json({ message: 'Erreur upload image', error: err.message });
+  }
+});
+
+// POST /api/products/upload-images - Upload multiple images (max 5)
+router.post('/upload-images', uploadImages, async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'Aucune image reçue (champ "images")' });
+    }
+
+    const urls = await uploadMultipleToCloudinary(req.files);
+    
+    res.status(200).json({ 
+      message: `${urls.length} image(s) uploadée(s) avec succès`,
+      urls 
+    });
+  } catch (err) {
+    console.error('Erreur upload multiple:', err);
+    res.status(500).json({ message: 'Erreur upload multiple', error: err.message });
   }
 });
 
