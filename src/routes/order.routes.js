@@ -4,13 +4,25 @@ import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import ShippingWilaya from '../models/ShippingWilaya.js';
 import nodemailer from 'nodemailer';
+import rateLimit from 'express-rate-limit';
 import { protect, admin } from '../middlewares/auth.js';
+
+
 const adminOnly = [protect, admin];
 
 const router = express.Router();
 
 
-
+// Limite : max 5 commandes par IP toutes les 15 minutes (ajuste selon tes besoins)
+const orderLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5,                   // max 5 requêtes par IP dans la fenêtre
+  message: {
+    message: 'Trop de commandes envoyées. Réessayez dans 15 minutes.'
+  },
+  standardHeaders: true,     // retourne les headers RateLimit-*
+  legacyHeaders: false,
+});
 
 
 
@@ -34,7 +46,7 @@ function validateAlgerianPhone(phone) {
 }
 
 // POST /api/orders - Créer une commande
-router.post('/', async (req, res) => {
+router.post('/',orderLimiter, async (req, res) => {
   try {
     const {
       productId,
@@ -145,13 +157,31 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET /api/orders - Lister toutes les commandes (pour toi admin)
+// GET /api/orders - Lister avec pagination
 router.get('/', async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;     // page actuelle (défaut 1)
+    const limit = parseInt(req.query.limit) || 10;  // nb items par page (défaut 10)
+
+    const skip = (page - 1) * limit;
+
+    // Compte total pour savoir combien de pages
+    const totalOrders = await Order.countDocuments();
+
     const orders = await Order.find()
       .populate('product', 'name slug')
-      .sort({ createdAt: -1 });
-    res.json(orders);
+      .sort({ createdAt: -1 })  // plus récentes d'abord
+      .skip(skip)
+      .limit(limit);
+
+    res.json({
+      orders,
+      currentPage: page,
+      totalPages: Math.ceil(totalOrders / limit),
+      totalOrders,
+      hasNextPage: page * limit < totalOrders,
+      hasPrevPage: page > 1
+    });
   } catch (error) {
     res.status(500).json({ message: 'Erreur', error: error.message });
   }

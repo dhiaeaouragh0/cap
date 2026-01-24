@@ -10,63 +10,68 @@ const router = express.Router();
 
 
 
-// GET /api/products - Liste avec TOUS les filtres possibles
+// GET /api/products - Liste avec filtres + pagination
 router.get('/', async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 12; // 12 produits par page (bon pour UI gaming)
+    const skip = (page - 1) * limit;
+
     const {
-      category,       // ID de catégorie
-      brand,          // marque (exacte, insensible à la casse)
-      minPrice,       // prix minimum (basePrice)
-      maxPrice,       // prix maximum
-      inStock = 'false', // true → produits avec stock > 0 (global ou variantes)
-      search,         // recherche dans nom ou slug (partielle)
-      isFeatured      // true → seulement produits en vedette
+      category,
+      brand,
+      minPrice,
+      maxPrice,
+      inStock = 'false',
+      search,
+      isFeatured
     } = req.query;
 
-    // Construction du filtre dynamique MongoDB
     let filter = {};
 
-    // 1. Catégorie
     if (category) filter.category = category;
-
-    // 2. Marque (insensible à la casse)
     if (brand) filter.brand = new RegExp(`^${brand}$`, 'i');
-
-    // 3. Prix (basePrice)
     if (minPrice || maxPrice) {
       filter.basePrice = {};
       if (minPrice) filter.basePrice.$gte = Number(minPrice);
       if (maxPrice) filter.basePrice.$lte = Number(maxPrice);
     }
-
-    // 4. En stock (global OU au moins une variante avec stock > 0)
     if (inStock === 'true') {
       filter.$or = [
         { stock: { $gt: 0 } },
         { 'variants.stock': { $gt: 0 } }
       ];
     }
-
-    // 5. Produits mis en avant
-    if (isFeatured === 'true') {
-      filter.isFeatured = true;
-    }
-
-    // 6. Recherche par nom ou slug (partielle, insensible à la casse)
+    if (isFeatured === 'true') filter.isFeatured = true;
     if (search) {
       const regex = new RegExp(search, 'i');
-      filter.$or = [
-        { name: regex },
-        { slug: regex }
-      ];
+      filter.$or = [{ name: regex }, { slug: regex }];
     }
 
-    // Exécution : populate catégorie + tri par date récente
+    // Compte total (pour pagination)
+    const totalProducts = await Product.countDocuments(filter);
+
+    // Récupère les produits paginés
     const products = await Product.find(filter)
       .populate('category')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 }) // récents en premier
+      .skip(skip)
+      .limit(limit);
 
-    res.json(products);
+    // Métadonnées pagination
+    const response = {
+      products,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalProducts / limit),
+        totalProducts,
+        hasNextPage: page * limit < totalProducts,
+        hasPrevPage: page > 1,
+        limit
+      }
+    };
+
+    res.json(response);
   } catch (error) {
     console.error('Erreur filtre produits:', error);
     res.status(500).json({ message: 'Erreur serveur', error: error.message });
