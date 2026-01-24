@@ -3,6 +3,10 @@ import Category from '../models/Category.js';
 
 const router = express.Router();
 
+import { protect, admin } from '../middlewares/auth.js';
+const adminOnly = [protect, admin];
+
+
 // GET /api/categories → Liste toutes
 router.get('/', async (req, res) => {
   try {
@@ -25,7 +29,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/categories → Créer (déjà fait, on garde)
-router.post('/', async (req, res) => {
+router.post('/',adminOnly, async (req, res) => {
   try {
     const { name, description, parent } = req.body;
 
@@ -48,7 +52,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/categories/:id → Modifier
-router.put('/:id', async (req, res) => {
+router.put('/:id',adminOnly, async (req, res) => {
   try {
     const { name, description, parent } = req.body;
 
@@ -75,7 +79,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/categories/:id → Supprimer
-router.delete('/:id', async (req, res) => {
+router.delete('/:id',adminOnly, async (req, res) => {
   try {
     const category = await Category.findByIdAndDelete(req.params.id);
     if (!category) return res.status(404).json({ message: 'Catégorie non trouvée' });

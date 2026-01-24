@@ -7,6 +7,9 @@ import productRoutes from './routes/product.routes.js';
 import orderRoutes from './routes/order.routes.js';
 
 
+import authRoutes from './routes/auth.routes.js';
+
+
 import shippingWilayaRoutes from './routes/shipping-wilaya.routes.js';
 
 const app = express();
@@ -35,3 +38,5 @@ connectDB().then(() => {
     console.log(`Serveur démarré sur le port ${PORT} !`);
   });
 });
+
+app.use('/api/auth', authRoutes);

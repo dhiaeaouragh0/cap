@@ -1,10 +1,14 @@
 // backend/src/routes/product.routes.js
+import { protect, admin } from '../middlewares/auth.js';
+const adminOnly = [protect, admin];
 import express from 'express';
 import Product from '../models/Product.js';
 
 import { uploadImage, uploadToCloudinary , uploadImages ,uploadMultipleToCloudinary} from '../middlewares/upload.js';
 
 const router = express.Router();
+
+
 
 // GET /api/products - Liste avec TOUS les filtres possibles
 router.get('/', async (req, res) => {
@@ -81,7 +85,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/products → Créer (slug généré ici)
-router.post('/', async (req, res) => {
+router.post('/',adminOnly, async (req, res) => {
   try {
     const { name, description, basePrice, category, brand, images, variants, stock, specs, discount, isFeatured } = req.body;
 
@@ -124,7 +128,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/products/:id → Modifier
-router.put('/:id', async (req, res) => {
+router.put('/:id',adminOnly, async (req, res) => {
   try {
     const productData = req.body;
 
@@ -153,7 +157,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/products/:id → Supprimer
-router.delete('/:id', async (req, res) => {
+router.delete('/:id',adminOnly, async (req, res) => {
   try {
     const product = await Product.findByIdAndDelete(req.params.id);
     if (!product) return res.status(404).json({ message: 'Produit non trouvé' });
@@ -165,7 +169,7 @@ router.delete('/:id', async (req, res) => {
 
 
 // POST /api/products/upload-image - Uploader une image et récupérer l'URL
-router.post('/upload-image', uploadImage, async (req, res) => {
+router.post('/upload-image',adminOnly, uploadImage, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'Aucun fichier reçu (champ "image")' });
@@ -180,7 +184,7 @@ router.post('/upload-image', uploadImage, async (req, res) => {
 });
 
 // POST /api/products/upload-images - Upload multiple images (max 5)
-router.post('/upload-images', uploadImages, async (req, res) => {
+router.post('/upload-images',adminOnly, uploadImages, async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ message: 'Aucune image reçue (champ "images")' });

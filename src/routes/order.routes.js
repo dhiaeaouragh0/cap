@@ -4,8 +4,15 @@ import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import ShippingWilaya from '../models/ShippingWilaya.js';
 import nodemailer from 'nodemailer';
+import { protect, admin } from '../middlewares/auth.js';
+const adminOnly = [protect, admin];
 
 const router = express.Router();
+
+
+
+
+
 
 // Config email (mets tes infos Gmail ici)
 const transporter = nodemailer.createTransport({
@@ -15,6 +22,8 @@ const transporter = nodemailer.createTransport({
     pass: 'jrdxlyvyciqbindj'          // ← App Password Gmail
   }
 });
+
+
 
 // Fonction de validation téléphone algérien
 function validateAlgerianPhone(phone) {
@@ -166,7 +175,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT /api/orders/:id/status
-router.put('/:id/status', async (req, res) => {
+router.put('/:id/status',adminOnly, async (req, res) => {
   try {
     const { status } = req.body;
 

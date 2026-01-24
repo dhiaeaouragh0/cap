@@ -26,7 +26,7 @@ const shippingWilayaSchema = new mongoose.Schema({
     min: 0
   }
 }, {
-  timestamps: true  // ✅ createdAt + updatedAt automatiques (sans bug next())
+  timestamps: true  
 });
 
 const ShippingWilaya = mongoose.model('ShippingWilaya', shippingWilayaSchema);

@@ -1,8 +1,11 @@
 // backend/src/routes/shipping-wilaya.routes.js
 import express from 'express';
 import ShippingWilaya from '../models/ShippingWilaya.js';
+import { protect, admin } from '../middlewares/auth.js';
+const adminOnly = [protect, admin];
 
 const router = express.Router();
+
 
 // GET - Liste toutes les wilayas de livraison
 router.get('/', async (req, res) => {
@@ -34,7 +37,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST - Ajouter une nouvelle wilaya (le bouton "Ajouter wilaya")
-router.post('/', async (req, res) => {
+router.post('/',adminOnly, async (req, res) => {
   try {
     const { numero, nom, prixDomicile, prixAgence } = req.body;
 
@@ -60,7 +63,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT - Modifier une wilaya (ex: changer les prix)
-router.put('/:numero', async (req, res) => {
+router.put('/:numero',adminOnly, async (req, res) => {
   try {
     const { nom, prixDomicile, prixAgence } = req.body;
 
@@ -81,7 +84,7 @@ router.put('/:numero', async (req, res) => {
 });
 
 // DELETE - Supprimer une wilaya
-router.delete('/:numero', async (req, res) => {
+router.delete('/:numero',adminOnly, async (req, res) => {
   try {
     const deleted = await ShippingWilaya.findOneAndDelete({ numero: Number(req.params.numero) });
     if (!deleted) {
