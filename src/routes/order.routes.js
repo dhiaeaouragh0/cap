@@ -157,20 +157,38 @@ router.post('/',orderLimiter, async (req, res) => {
   }
 });
 
-// GET /api/orders - Lister avec pagination
-router.get('/', async (req, res) => {
+// GET /api/orders - Lister avec pagination + filtres
+router.get('/', adminOnly, async (req, res) => {  // ← add adminOnly if you want to protect it
   try {
-    const page = parseInt(req.query.page) || 1;     // page actuelle (défaut 1)
-    const limit = parseInt(req.query.limit) || 10;  // nb items par page (défaut 10)
-
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    // Compte total pour savoir combien de pages
-    const totalOrders = await Order.countDocuments();
+    // Build filter object
+    const filter = {};
 
-    const orders = await Order.find()
+    // Status filter
+    if (req.query.status && req.query.status !== 'all') {
+      filter.status = req.query.status;
+    }
+
+    // Optional: add search support if you want (by customer name/phone/email)
+    if (req.query.search) {
+      const regex = new RegExp(req.query.search, 'i');
+      filter.$or = [
+        { customerName: regex },
+        { customerPhone: regex },
+        { customerEmail: regex },
+      ];
+    }
+
+    // Count total matching documents
+    const totalOrders = await Order.countDocuments(filter);
+
+    // Fetch paginated orders
+    const orders = await Order.find(filter)
       .populate('product', 'name slug')
-      .sort({ createdAt: -1 })  // plus récentes d'abord
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
 
@@ -180,10 +198,11 @@ router.get('/', async (req, res) => {
       totalPages: Math.ceil(totalOrders / limit),
       totalOrders,
       hasNextPage: page * limit < totalOrders,
-      hasPrevPage: page > 1
+      hasPrevPage: page > 1,
     });
   } catch (error) {
-    res.status(500).json({ message: 'Erreur', error: error.message });
+    console.error('Erreur liste commandes:', error);
+    res.status(500).json({ message: 'Erreur serveur', error: error.message });
   }
 });
 
