@@ -89,21 +89,37 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/products → Créer (slug généré ici)
-router.post('/',adminOnly, async (req, res) => {
+// POST /api/products
+router.post('/', adminOnly, async (req, res) => {
   try {
-    const { name, description, basePrice, category, brand, images, variants, stock, specs, discount, isFeatured } = req.body;
+    let { name, description, basePrice, category, brand, images, variants, stock, specs, discount, isFeatured } = req.body;
 
     if (!name || !basePrice || !category) {
       return res.status(400).json({ message: 'Nom, prix de base et catégorie obligatoires' });
     }
 
+    // Générer slug de base
     let slug = name
       .toLowerCase()
       .replace(/\s+/g, '-')
       .replace(/[^\w\-]+/g, '')
       .replace(/\-\-+/g, '-')
       .trim();
+
+    // Vérifier si slug existe déjà
+    let existing = await Product.findOne({ slug });
+    let counter = 1;
+    while (existing) {
+      slug = `${slug}-${counter}`; // ou `${slug}-${Date.now().toString().slice(-6)}`
+      existing = await Product.findOne({ slug });
+      counter++;
+    }
+
+    // Vérifier nom (si tu veux aussi unique sur name)
+    existing = await Product.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } });
+    if (existing) {
+      return res.status(409).json({ message: 'Nom de produit déjà utilisé', field: 'name' });
+    }
 
     const productData = {
       name,
@@ -126,7 +142,12 @@ router.post('/',adminOnly, async (req, res) => {
     res.status(201).json(newProduct);
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ message: 'Produit existe déjà (nom ou slug)' });
+      const field = Object.keys(error.keyValue)[0];
+      return res.status(409).json({
+        message: `Produit existe déjà (${field})`,
+        field,
+        value: error.keyValue[field],
+      });
     }
     res.status(500).json({ message: 'Erreur création produit', error: error.message });
   }
