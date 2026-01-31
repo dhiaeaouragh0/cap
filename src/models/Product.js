@@ -93,7 +93,7 @@ const productSchema = new mongoose.Schema({
 });
 
 // Index supplémentaire sur slug (déjà unique dans le champ)
-productSchema.index({ slug: 1 }, { unique: true });
+// productSchema.index({ slug: 1 }, { unique: true });
 
 // Optionnel : index sur name si tu veux le rendre unique
 // productSchema.index({ name: 1 }, { unique: true, sparse: true });
