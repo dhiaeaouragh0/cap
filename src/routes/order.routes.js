@@ -46,11 +46,11 @@ function validateAlgerianPhone(phone) {
 }
 
 // POST /api/orders - Créer une commande
-router.post('/',orderLimiter, async (req, res) => {
+router.post('/', orderLimiter, async (req, res) => {
   try {
     const {
       productId,
-      variantName,
+      variantSku,
       quantity,
       customerName,
       customerPhone,
@@ -62,8 +62,17 @@ router.post('/',orderLimiter, async (req, res) => {
     } = req.body;
 
     // Validation basique
-    if (!productId || !quantity || !customerName || !customerPhone || !customerEmail || !wilaya || !deliveryType || !address) {
-      return res.status(400).json({ message: 'Tous les champs obligatoires manquent' });
+    if (
+      !productId ||
+      !variantSku ||
+      !quantity ||
+      !customerName ||
+      !customerPhone ||
+      !wilaya ||
+      !deliveryType ||
+      !address
+    ) {
+      return res.status(400).json({ message: 'Tous les champs obligatoires sont requis' });
     }
 
     // Validation téléphone
@@ -77,19 +86,18 @@ router.post('/',orderLimiter, async (req, res) => {
     const product = await Product.findById(productId);
     if (!product) return res.status(404).json({ message: 'Produit non trouvé' });
 
-    // Prix unitaire (base + variante si choisi)
-    let unitPrice = product.basePrice;
-    if (variantName) {
-      const variant = product.variants.find(v => v.name === variantName);
-      if (variant) unitPrice += variant.priceDifference;
-    }
+    // Récupérer le variant choisi par SKU
+    const variant = product.variants.find(v => v.sku === variantSku);
+    if (!variant) return res.status(400).json({ message: 'Variant non trouvé pour ce produit' });
+
+    // Prix unitaire
+    const unitPrice = variant.price;
 
     const subtotal = unitPrice * quantity;
 
     // Récupérer frais livraison
-    
     const shippingWilaya = await ShippingWilaya.findOne({
-      nom: { $regex: new RegExp(wilaya, 'i') }  // partial match, very forgiving
+      nom: { $regex: new RegExp(wilaya, 'i') }
     });
     if (!shippingWilaya) {
       return res.status(400).json({ message: `Wilaya non trouvée : ${wilaya}` });
@@ -98,27 +106,24 @@ router.post('/',orderLimiter, async (req, res) => {
     const shippingFee = deliveryType === 'domicile' ? shippingWilaya.prixDomicile : shippingWilaya.prixAgence;
 
     // Livraison gratuite ?
-    let finalShipping = shippingFee;
     const FREE_THRESHOLD = 20000;
-    if (subtotal >= FREE_THRESHOLD) {
-      finalShipping = 0;
-    }
+    const finalShipping = subtotal >= FREE_THRESHOLD ? 0 : shippingFee;
 
     const totalPrice = subtotal + finalShipping;
 
     // Créer la commande
     const newOrder = new Order({
       product: productId,
-      variantName,
+      variantSku,
       quantity,
       customerName,
       customerPhone,
-      customerEmail,
+      customerEmail: customerEmail || '',
       wilaya,
       deliveryType,
       address,
-      note,
-      productPrice: unitPrice,
+      note: note || '',
+      unitPrice,
       shippingFee: finalShipping,
       totalPrice
     });
@@ -126,26 +131,27 @@ router.post('/',orderLimiter, async (req, res) => {
     await newOrder.save();
 
     // Email de confirmation
-    const mailOptions = {
-      from: 'dhiaezone@gmail.com',
-      to: customerEmail,
-      subject: 'Confirmation de commande - DZ GAME ZONE',
-      html: `
-        <h2>Merci pour votre commande ! 🎮</h2>
-        <p>Produit : ${product.name} ${variantName ? `(${variantName})` : ''}</p>
-        <p>Quantité : ${quantity}</p>
-        <p>Prix unitaire : ${unitPrice.toLocaleString()} DA</p>
-        <p>Sous-total : ${subtotal.toLocaleString()} DA</p>
-        <p>Livraison (${deliveryType}) vers ${wilaya} : ${finalShipping === 0 ? 'GRATUITE' : finalShipping.toLocaleString() + ' DA'}</p>
-        <p><strong>Total à payer à la livraison : ${totalPrice.toLocaleString()} DA</strong></p>
-        <p>Adresse : ${address}</p>
-        <p>Note : ${note || 'Aucune'}</p>
-        <p>Nous vous contacterons bientôt sur ${customerPhone} pour confirmer.</p>
-        <p>DZ GAME ZONE - Level up ! 🔥</p>
-      `
-    };
-
-    await transporter.sendMail(mailOptions);
+    if (customerEmail) {
+      const mailOptions = {
+        from: 'dhiaezone@gmail.com',
+        to: customerEmail,
+        subject: 'Confirmation de commande - DZ GAME ZONE',
+        html: `
+          <h2>Merci pour votre commande ! 🎮</h2>
+          <p>Produit : ${product.name} (${variant.name})</p>
+          <p>Quantité : ${quantity}</p>
+          <p>Prix unitaire : ${unitPrice.toLocaleString()} DA</p>
+          <p>Sous-total : ${subtotal.toLocaleString()} DA</p>
+          <p>Livraison (${deliveryType}) vers ${wilaya} : ${finalShipping === 0 ? 'GRATUITE' : finalShipping.toLocaleString() + ' DA'}</p>
+          <p><strong>Total à payer à la livraison : ${totalPrice.toLocaleString()} DA</strong></p>
+          <p>Adresse : ${address}</p>
+          <p>Note : ${note || 'Aucune'}</p>
+          <p>Nous vous contacterons bientôt sur ${customerPhone} pour confirmer.</p>
+          <p>DZ GAME ZONE - Level up ! 🔥</p>
+        `
+      };
+      await transporter.sendMail(mailOptions);
+    }
 
     res.status(201).json({
       message: 'Commande créée et email envoyé !',
@@ -156,6 +162,7 @@ router.post('/',orderLimiter, async (req, res) => {
     res.status(500).json({ message: 'Erreur création commande', error: error.message });
   }
 });
+
 
 // GET /api/orders - Lister avec pagination + filtres
 router.get('/', adminOnly, async (req, res) => {  // ← add adminOnly if you want to protect it

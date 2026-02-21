@@ -69,8 +69,22 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // BASE PRICE → price of default variant
+    basePrice: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
   },
   { timestamps: true }
 );
+
+productSchema.pre("save", async function () {
+  if (this.variants && this.variants.length > 0) {
+    const defaultVariant = this.variants.find(v => v.isDefault) || this.variants[0];
+    this.basePrice = defaultVariant.price;
+  }
+  // no next() needed in async functions
+});
 
 export default mongoose.model("Product", productSchema);

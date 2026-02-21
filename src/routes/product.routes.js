@@ -89,13 +89,13 @@ router.get('/:id', async (req, res) => {
 // POST /api/products
 router.post('/', adminOnly, async (req, res) => {
   try {
-    let { name, description, basePrice, brand, images, variants, stock, specs, discount, isFeatured } = req.body;
+    let { name, description, brand, images, variants, tags, isFeatured } = req.body;
 
-    if (!name || !basePrice) {
-      return res.status(400).json({ message: 'Nom et prix de base obligatoires' });
+    if (!name || !description || !variants || variants.length === 0) {
+      return res.status(400).json({ message: 'Nom, description et au moins un variant sont obligatoires' });
     }
 
-    // Générer slug de base
+    // Générer slug unique
     let slug = name
       .toLowerCase()
       .replace(/\s+/g, '-')
@@ -103,20 +103,23 @@ router.post('/', adminOnly, async (req, res) => {
       .replace(/\-\-+/g, '-')
       .trim();
 
-    // Vérifier si slug existe déjà
     let existing = await Product.findOne({ slug });
     let counter = 1;
     while (existing) {
-      slug = `${slug}-${counter}`; // ou `${slug}-${Date.now().toString().slice(-6)}`
+      slug = `${slug}-${counter}`;
       existing = await Product.findOne({ slug });
       counter++;
     }
 
-    // Vérifier nom (si tu veux aussi unique sur name)
+    // Vérifier nom unique
     existing = await Product.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } });
     if (existing) {
       return res.status(409).json({ message: 'Nom de produit déjà utilisé', field: 'name' });
     }
+
+    // Calculer basePrice à partir du variant par défaut
+    const defaultVariant = variants.find(v => v.isDefault) || variants[0];
+    const basePrice = defaultVariant.price;
 
     const productData = {
       name,
@@ -125,10 +128,8 @@ router.post('/', adminOnly, async (req, res) => {
       basePrice,
       brand: brand || '',
       images: images || [],
-      variants: variants || [],
-      stock: stock || 0,
-      specs: specs || {},
-      discount: discount || 0,
+      variants,
+      tags: tags || [],
       isFeatured: isFeatured || false,
     };
 
