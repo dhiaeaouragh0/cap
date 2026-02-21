@@ -18,7 +18,6 @@ router.get('/', async (req, res) => {
     const skip = (page - 1) * limit;
 
     const {
-      category,
       brand,
       minPrice,
       maxPrice,
@@ -29,7 +28,6 @@ router.get('/', async (req, res) => {
 
     let filter = {};
 
-    if (category) filter.category = category;
     if (brand) filter.brand = new RegExp(`^${brand}$`, 'i');
     if (minPrice || maxPrice) {
       filter.basePrice = {};
@@ -53,7 +51,6 @@ router.get('/', async (req, res) => {
 
     // Récupère les produits paginés
     const products = await Product.find(filter)
-      .populate('category')
       .sort({ createdAt: -1 }) // récents en premier
       .skip(skip)
       .limit(limit);
@@ -81,7 +78,7 @@ router.get('/', async (req, res) => {
 // GET /api/products/:id → Détails d'un produit
 router.get('/:id', async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).populate('category');
+    const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: 'Produit non trouvé' });
     res.json(product);
   } catch (error) {
@@ -92,10 +89,10 @@ router.get('/:id', async (req, res) => {
 // POST /api/products
 router.post('/', adminOnly, async (req, res) => {
   try {
-    let { name, description, basePrice, category, brand, images, variants, stock, specs, discount, isFeatured } = req.body;
+    let { name, description, basePrice, brand, images, variants, stock, specs, discount, isFeatured } = req.body;
 
-    if (!name || !basePrice || !category) {
-      return res.status(400).json({ message: 'Nom, prix de base et catégorie obligatoires' });
+    if (!name || !basePrice) {
+      return res.status(400).json({ message: 'Nom et prix de base obligatoires' });
     }
 
     // Générer slug de base
@@ -126,7 +123,6 @@ router.post('/', adminOnly, async (req, res) => {
       slug,
       description,
       basePrice,
-      category,
       brand: brand || '',
       images: images || [],
       variants: variants || [],
