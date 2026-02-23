@@ -5,7 +5,7 @@ const variantSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true, // ex: "Black Cap", "Red Edition"
+      required: true, // ex: "Noir", "Gris", "Taille M"
     },
     sku: {
       type: String,
@@ -55,21 +55,21 @@ const productSchema = new mongoose.Schema(
     },
     images: {
       type: [String],
-      default: [],
+      default: [], // ← on garde le champ mais il sera vide ou supprimé plus tard
     },
     tags: {
       type: [String],
-      default: [], // "street", "sport"
+      default: [],
     },
     variants: {
       type: [variantSchema],
-      required: true,
+      required: true,          // ← maintenant obligatoire
+      minlength: 1,            // au moins 1 variante
     },
     isFeatured: {
       type: Boolean,
       default: false,
     },
-    // BASE PRICE → price of default variant
     basePrice: {
       type: Number,
       required: true,
@@ -83,8 +83,12 @@ productSchema.pre("save", async function () {
   if (this.variants && this.variants.length > 0) {
     const defaultVariant = this.variants.find(v => v.isDefault) || this.variants[0];
     this.basePrice = defaultVariant.price;
+
+    // Optionnel : forcer la première variante comme default si aucune ne l'est
+    if (!this.variants.some(v => v.isDefault)) {
+      this.variants[0].isDefault = true;
+    }
   }
-  // no next() needed in async functions
 });
 
 export default mongoose.model("Product", productSchema);
