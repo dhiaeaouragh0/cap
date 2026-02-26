@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies (nodemon included)
-RUN npm install
+RUN npm ci --only=production
 
 # Copy source code
 COPY . .
