@@ -231,83 +231,121 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT /api/orders/:id/status
-router.put('/:id/status',adminOnly, async (req, res) => {
+router.put('/:id/status', adminOnly, async (req, res) => {
   try {
     const { status } = req.body;
 
     const validStatuses = ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'];
     if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: `Statut invalide. Valeurs acceptées : ${validStatuses.join(', ')}` });
+      return res.status(400).json({
+        message: `Statut invalide. Valeurs acceptées : ${validStatuses.join(', ')}`,
+      });
     }
 
-    // Récupérer la commande actuelle
+    // Récupérer la commande
     const order = await Order.findById(req.params.id);
     if (!order) {
       return res.status(404).json({ message: 'Commande non trouvée' });
     }
 
-    // Si on passe à "confirmed" ou "shipped" → on diminue le stock
-    if (status === 'confirmed' || status === 'shipped') {
+    // Vérifier si le statut change vraiment (évite des opérations inutiles)
+    if (order.status === status) {
+      return res.json(order); // déjà au bon statut → on renvoie tel quel
+    }
+
+    // ────────────────────────────────────────────────
+    // Gestion du stock seulement si le statut change vers/depuis des états critiques
+    // ────────────────────────────────────────────────
+
+    const previousStatus = order.status;
+    const isDecreasingStock = status === 'confirmed';
+    const isRestoringStock =
+      (previousStatus === 'confirmed' || previousStatus === 'shipped') &&
+      status === 'cancelled';
+
+    if (isDecreasingStock || isRestoringStock) {
       const product = await Product.findById(order.product);
       if (!product) {
         return res.status(404).json({ message: 'Produit lié à la commande non trouvé' });
       }
 
-      let stockToDecrease = order.quantity;
-
-      // Si variante spécifique
-      if (order.variantName) {
-        const variant = product.variants.find(v => v.name === order.variantName);
-        if (!variant) {
-          return res.status(400).json({ message: 'Variante non trouvée dans le produit' });
-        }
-
-        if (variant.stock < stockToDecrease) {
-          return res.status(400).json({ message: `Stock insuffisant pour la variante ${order.variantName}` });
-        }
-
-        variant.stock -= stockToDecrease;
-        await product.save(); // Sauvegarde le produit modifié
-      } else {
-        // Pas de variante : on diminue le stock global
-        if (product.stock < stockToDecrease) {
-          return res.status(400).json({ message: 'Stock global insuffisant' });
-        }
-
-        product.stock -= stockToDecrease;
-        await product.save();
+      if (!order.variantSku) {
+        return res.status(400).json({ message: 'Référence variante (variantSku) manquante dans la commande' });
       }
+
+      const variant = product.variants.find((v) => v.sku === order.variantSku);
+      if (!variant) {
+        return res.status(400).json({
+          message: `Variante avec SKU ${order.variantSku} non trouvée dans le produit`,
+        });
+      }
+
+      const quantity = order.quantity;
+
+      if (isDecreasingStock) {
+        if (variant.stock < quantity) {
+          return res.status(400).json({
+            message: `Stock insuffisant pour ${product.name} - ${variant.name} (${variant.stock} restant, besoin : ${quantity})`,
+          });
+        }
+        variant.stock -= quantity;
+      } else if (isRestoringStock) {
+        variant.stock += quantity; // remise en stock
+      }
+
+      // Mise à jour du prix de base (optionnel mais cohérent)
+      const defaultVariant = product.variants.find((v) => v.isDefault) || product.variants[0];
+      if (defaultVariant) {
+        product.basePrice = defaultVariant.price;
+      }
+
+      await product.save();
     }
 
-    // Mise à jour du statut
+    // ────────────────────────────────────────────────
+    // Mise à jour du statut de la commande
+    // ────────────────────────────────────────────────
     const updatedOrder = await Order.findByIdAndUpdate(
       req.params.id,
-      { status, updatedAt: Date.now() },
-      { new: true }
+      { status },
+      { new: true, runValidators: true }
     );
 
-    // Optionnel : email au client quand statut change
-    if (status === 'confirmed' || status === 'shipped') {
-      const mailOptions = {
-        from: 'tonemail@gmail.com',
-        to: updatedOrder.customerEmail,
-        subject: `Mise à jour statut commande #${updatedOrder._id}`,
-        html: `
-          <h2>Bonjour ${updatedOrder.customerName},</h2>
-          <p>Votre commande #${updatedOrder._id} est maintenant : <strong>${status.toUpperCase()}</strong> !</p>
-          <p>Produit : ${updatedOrder.product} (quantité : ${updatedOrder.quantity})</p>
-          <p>Total : ${updatedOrder.totalPrice.toLocaleString()} DA</p>
-          <p>Merci de votre confiance !</p>
-        `
-      };
+    // ────────────────────────────────────────────────
+    // Envoi email (seulement si pertinent)
+    // ────────────────────────────────────────────────
+    if (['confirmed', 'shipped', 'delivered', 'cancelled'].includes(status)) {
+      try {
+        const mailOptions = {
+          from: process.env.EMAIL_FROM || 'no-reply@tondomaine.com',
+          to: updatedOrder.customerEmail,
+          subject: `Mise à jour de votre commande #${updatedOrder._id}`,
+          html: `
+            <h2>Bonjour ${updatedOrder.customerName},</h2>
+            <p>Votre commande #${updatedOrder._id.toString().slice(-8).toUpperCase()} est maintenant :</p>
+            <h3 style="color: #8B0000;">${status.toUpperCase()}</h3>
+            <p>Produit : ${updatedOrder.productName || 'Produit'} × ${updatedOrder.quantity}</p>
+            <p>Wilaya : ${updatedOrder.wilaya}</p>
+            <p>Total : ${updatedOrder.totalAmount?.toLocaleString() || '?'} DZD</p>
+            <p>Merci de votre confiance !</p>
+            <small>Équipe DZ Streetwear</small>
+          `,
+        };
 
-      await transporter.sendMail(mailOptions);
+        await transporter.sendMail(mailOptions);
+      } catch (mailErr) {
+        console.error('Erreur envoi email :', mailErr);
+        // Ne pas bloquer la réponse API pour une erreur email
+      }
     }
 
     res.json(updatedOrder);
   } catch (error) {
-    res.status(500).json({ message: 'Erreur mise à jour statut', error: error.message });
+    console.error('Erreur mise à jour statut commande:', error);
+    res.status(500).json({
+      message: 'Erreur serveur lors de la mise à jour du statut',
+      error: error.message,
+    });
   }
 });
-
 export default router;
