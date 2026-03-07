@@ -25,7 +25,7 @@ app.use('/api/dashboard', dashboard);
 
 // Route de test
 app.get('/', (req, res) => {
-  res.send('DZ GAME ZONE Backend - Tout est prêt ! 🚀');
+  res.send('Backend - Tout est prêt ! 🚀');
 });
 
 const PORT = process.env.PORT || 5000;

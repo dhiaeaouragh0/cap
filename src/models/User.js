@@ -16,8 +16,8 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['admin', 'user'],
-    default: 'user'  // pour l'instant, tout le monde est admin (change plus tard)
+    enum: ['admin', 'confirmateur', 'user'],
+    default: 'user'  
   },
   createdAt: { type: Date, default: Date.now }
 });
@@ -27,8 +27,6 @@ userSchema.pre('save', async function () {
 
   this.password = await bcrypt.hash(this.password, 10);
 });
-
-
 
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);

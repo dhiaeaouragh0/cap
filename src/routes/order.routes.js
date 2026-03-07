@@ -5,13 +5,12 @@ import Product from '../models/Product.js';
 import ShippingWilaya from '../models/ShippingWilaya.js';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
-import { protect, admin } from '../middlewares/auth.js';
-
+import { protect, admin, confirmateur } from '../middlewares/auth.js';
 
 const adminOnly = [protect, admin];
+const confirmateurOnly = [protect, confirmateur]; // admin et confirmateur peuvent accéder
 
 const router = express.Router();
-
 
 // Limite : max 5 commandes par IP toutes les 15 minutes (ajuste selon tes besoins)
 const orderLimiter = rateLimit({
@@ -24,8 +23,6 @@ const orderLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-
-
 // Config email (mets tes infos Gmail ici)
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -34,8 +31,6 @@ const transporter = nodemailer.createTransport({
     pass: 'jrdxlyvyciqbindj'          // ← App Password Gmail
   }
 });
-
-
 
 // Fonction de validation téléphone algérien
 function validateAlgerianPhone(phone) {
@@ -163,9 +158,8 @@ router.post('/', orderLimiter, async (req, res) => {
   }
 });
 
-
 // GET /api/orders - Lister avec pagination + filtres
-router.get('/', adminOnly, async (req, res) => {  // ← add adminOnly if you want to protect it
+router.get('/', confirmateurOnly, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -214,7 +208,7 @@ router.get('/', adminOnly, async (req, res) => {  // ← add adminOnly if you wa
 });
 
 // GET /api/orders/:id - Détails d'une commande spécifique
-router.get('/:id', async (req, res) => {
+router.get('/:id', confirmateurOnly, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
       .populate('product', 'name slug images basePrice variants') // affiche détails produit
@@ -231,11 +225,18 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT /api/orders/:id/status
-router.put('/:id/status', adminOnly, async (req, res) => {
+router.put('/:id/status', confirmateurOnly, async (req, res) => {
   try {
     const { status } = req.body;
 
-    const validStatuses = ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'];
+    const validStatuses = [
+      'pending',
+      'confirmed',
+      'shipped',
+      'delivered',
+      'cancelled',
+      'returned'
+    ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         message: `Statut invalide. Valeurs acceptées : ${validStatuses.join(', ')}`,
@@ -261,7 +262,7 @@ router.put('/:id/status', adminOnly, async (req, res) => {
     const isDecreasingStock = status === 'confirmed';
     const isRestoringStock =
       (previousStatus === 'confirmed' || previousStatus === 'shipped') &&
-      status === 'cancelled';
+      (status === 'cancelled' || status === 'returned');
 
     if (isDecreasingStock || isRestoringStock) {
       const product = await Product.findById(order.product);
@@ -303,32 +304,55 @@ router.put('/:id/status', adminOnly, async (req, res) => {
     }
 
     // ────────────────────────────────────────────────
+    // Préparation des champs à mettre à jour
+    // ────────────────────────────────────────────────
+    const updateFields = { status };
+
+    if (status === 'confirmed' && previousStatus !== 'confirmed') {
+      updateFields.confirmedBy = req.user._id;
+      updateFields.confirmedAt = new Date();
+    }
+
+    // Ajout à l'historique des statuts
+    updateFields.$push = {
+      statusHistory: {
+        status,
+        changedBy: req.user._id,
+        role: req.user.role, // Assumant que le modèle User a un champ 'role'
+        date: new Date()
+      }
+    };
+
+    // ────────────────────────────────────────────────
     // Mise à jour du statut de la commande
     // ────────────────────────────────────────────────
-    const updatedOrder = await Order.findByIdAndUpdate(
+    let updatedOrder = await Order.findByIdAndUpdate(
       req.params.id,
-      { status },
+      updateFields,
       { new: true, runValidators: true }
     );
 
+    // Populate pour obtenir le nom du produit
+    updatedOrder = await updatedOrder.populate('product', 'name');
+
     // ────────────────────────────────────────────────
-    // Envoi email (seulement si pertinent)
+    // Envoi email (seulement si pertinent et email présent)
     // ────────────────────────────────────────────────
-    if (['confirmed', 'shipped', 'delivered', 'cancelled'].includes(status)) {
+    if (updatedOrder.customerEmail && ['confirmed', 'shipped', 'delivered', 'cancelled', 'returned'].includes(status)) {
       try {
         const mailOptions = {
-          from: process.env.EMAIL_FROM || 'no-reply@tondomaine.com',
+          from: 'dhiaezone@gmail.com',
           to: updatedOrder.customerEmail,
-          subject: `Mise à jour de votre commande #${updatedOrder._id}`,
+          subject: `Mise à jour de votre commande #${updatedOrder._id.toString().slice(-8).toUpperCase()}`,
           html: `
             <h2>Bonjour ${updatedOrder.customerName},</h2>
             <p>Votre commande #${updatedOrder._id.toString().slice(-8).toUpperCase()} est maintenant :</p>
             <h3 style="color: #8B0000;">${status.toUpperCase()}</h3>
-            <p>Produit : ${updatedOrder.productName || 'Produit'} × ${updatedOrder.quantity}</p>
+            <p>Produit : ${updatedOrder.product?.name || 'Produit'} × ${updatedOrder.quantity}</p>
             <p>Wilaya : ${updatedOrder.wilaya}</p>
-            <p>Total : ${updatedOrder.totalAmount?.toLocaleString() || '?'} DZD</p>
+            <p>Total : ${updatedOrder.totalPrice.toLocaleString()} DA</p>
             <p>Merci de votre confiance !</p>
-            <small>Équipe DZ Streetwear</small>
+            <small>Équipe DZ GAME ZONE</small>
           `,
         };
 
@@ -348,4 +372,80 @@ router.put('/:id/status', adminOnly, async (req, res) => {
     });
   }
 });
+
+// PUT /api/orders/:id/price - Mettre à jour le prix total
+router.put('/:id/price', confirmateurOnly, async (req, res) => {
+  try {
+    const { newTotalPrice } = req.body;
+
+    if (typeof newTotalPrice !== 'number' || newTotalPrice < 0) {
+      return res.status(400).json({ message: 'Le nouveau prix total doit être un nombre positif.' });
+    }
+
+    // Récupérer la commande
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: 'Commande non trouvée' });
+    }
+
+    const oldTotalPrice = order.totalPrice;
+
+    // Vérifier si le prix change vraiment
+    if (oldTotalPrice === newTotalPrice) {
+      return res.json(order); // pas de changement → on renvoie tel quel
+    }
+
+    // Mise à jour du prix
+    order.totalPrice = newTotalPrice;
+
+    // Ajout à l'historique des prix
+    order.priceHistory.push({
+      oldPrice: oldTotalPrice,
+      newPrice: newTotalPrice,
+      changedBy: req.user._id,
+      role: req.user.role, // Assumant que le modèle User a un champ 'role'
+      date: new Date()
+    });
+
+    await order.save();
+
+    // Populate pour obtenir le nom du produit
+    const updatedOrder = await Order.findById(req.params.id).populate('product', 'name');
+
+    // Envoi email si email présent
+    if (updatedOrder.customerEmail) {
+      try {
+        const mailOptions = {
+          from: 'dhiaezone@gmail.com',
+          to: updatedOrder.customerEmail,
+          subject: `Mise à jour du prix de votre commande #${updatedOrder._id.toString().slice(-8).toUpperCase()}`,
+          html: `
+            <h2>Bonjour ${updatedOrder.customerName},</h2>
+            <p>Le prix de votre commande #${updatedOrder._id.toString().slice(-8).toUpperCase()} a été mis à jour.</p>
+            <p>Ancien total : ${oldTotalPrice.toLocaleString()} DA</p>
+            <p>Nouveau total : ${newTotalPrice.toLocaleString()} DA</p>
+            <p>Produit : ${updatedOrder.product?.name || 'Produit'} × ${updatedOrder.quantity}</p>
+            <p>Wilaya : ${updatedOrder.wilaya}</p>
+            <p>Merci de votre compréhension !</p>
+            <small>Équipe DZ GAME ZONE</small>
+          `,
+        };
+
+        await transporter.sendMail(mailOptions);
+      } catch (mailErr) {
+        console.error('Erreur envoi email :', mailErr);
+        // Ne pas bloquer la réponse API pour une erreur email
+      }
+    }
+
+    res.json(updatedOrder);
+  } catch (error) {
+    console.error('Erreur mise à jour prix commande:', error);
+    res.status(500).json({
+      message: 'Erreur serveur lors de la mise à jour du prix',
+      error: error.message,
+    });
+  }
+});
+
 export default router;

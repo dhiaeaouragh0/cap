@@ -1,6 +1,6 @@
 // backend/src/middlewares/auth.js
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';  // on va créer ce modèle après
+import User from '../models/User.js';
 
 export const protect = async (req, res, next) => {
   let token;
@@ -32,11 +32,29 @@ export const protect = async (req, res, next) => {
   }
 };
 
-// Middleware admin (optionnel – pour routes ultra-sensibles)
+// Middleware admin (pour routes réservées aux admins uniquement)
 export const admin = (req, res, next) => {
   if (req.user && req.user.role === 'admin') {
     next();
   } else {
     return res.status(403).json({ message: 'Accès réservé aux admins' });
+  }
+};
+
+// Middleware confirmateur (admins y ont aussi accès)
+export const confirmateur = (req, res, next) => {
+  if (req.user && (req.user.role === 'confirmateur' || req.user.role === 'admin')) {
+    next();
+  } else {
+    return res.status(403).json({ message: 'Accès réservé aux confirmateurs et admins' });
+  }
+};
+
+// Middleware user (pour routes réservées aux users uniquement)
+export const user = (req, res, next) => {
+  if (req.user && req.user.role === 'user') {
+    next();
+  } else {
+    return res.status(403).json({ message: 'Accès réservé aux utilisateurs' });
   }
 };
