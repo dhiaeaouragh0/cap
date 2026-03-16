@@ -89,48 +89,176 @@ router.get('/:id', async (req, res) => {
 // POST /api/products
 router.post('/', adminOnly, async (req, res) => {
   try {
-    let { name, description, brand, images, variants, tags, isFeatured } = req.body;
+    let {
+      name,
+      description,
+      brand,
+      images,
+      tags,
+      isFeatured,
+      optionTypes = [],     // ← new & important
+      variants,             // now must have attributes: Map
+    } = req.body;
 
-    if (!name || !description || !variants || variants.length === 0) {
-      return res.status(400).json({ message: 'Nom, description et au moins un variant sont obligatoires' });
+    // ───────────────────────────────────────────────
+    //  Required fields
+    // ───────────────────────────────────────────────
+    if (!name?.trim()) {
+      return res.status(400).json({ message: 'Le nom est obligatoire', field: 'name' });
+    }
+    if (!description?.trim()) {
+      return res.status(400).json({ message: 'La description est obligatoire', field: 'description' });
+    }
+    if (!Array.isArray(variants) || variants.length === 0) {
+      return res.status(400).json({ message: 'Au moins une variante est requise', field: 'variants' });
+    }
+    if (!Array.isArray(optionTypes) || optionTypes.length === 0) {
+      return res.status(400).json({
+        message: 'Les types d\'options (ex: color, size) sont obligatoires quand il y a des variantes',
+        field: 'optionTypes'
+      });
     }
 
-    // Générer slug unique
+    // ───────────────────────────────────────────────
+    //  Validate optionTypes structure
+    // ───────────────────────────────────────────────
+    const optionNames = new Set();
+    for (const opt of optionTypes) {
+      if (!opt.name?.trim() || !Array.isArray(opt.values) || opt.values.length === 0) {
+        return res.status(400).json({
+          message: 'Chaque optionType doit avoir un "name" et un tableau "values" non vide',
+          field: 'optionTypes'
+        });
+      }
+      const normalizedName = opt.name.trim().toLowerCase();
+      if (optionNames.has(normalizedName)) {
+        return res.status(400).json({
+          message: `Option "${opt.name}" est déclarée plusieurs fois`,
+          field: 'optionTypes'
+        });
+      }
+      optionNames.add(normalizedName);
+    }
+
+    // ───────────────────────────────────────────────
+    //  Validate variants
+    // ───────────────────────────────────────────────
+    const seenCombinations = new Set();
+    let defaultVariant = null;
+
+    for (const [index, variant] of variants.entries()) {
+      if (!variant.sku?.trim()) {
+        return res.status(400).json({
+          message: `SKU manquant pour la variante #${index + 1}`,
+          field: `variants[${index}].sku`
+        });
+      }
+      if (typeof variant.price !== 'number' || variant.price < 0) {
+        return res.status(400).json({
+          message: `Prix invalide pour la variante #${index + 1}`,
+          field: `variants[${index}].price`
+        });
+      }
+      if (typeof variant.stock !== 'number' || variant.stock < 0) {
+        return res.status(400).json({
+          message: `Stock invalide pour la variante #${index + 1}`,
+          field: `variants[${index}].stock`
+        });
+      }
+      if (!variant.attributes || typeof variant.attributes !== 'object' || variant.attributes instanceof Array) {
+        return res.status(400).json({
+          message: `La variante #${index + 1} doit avoir un objet "attributes"`,
+          field: `variants[${index}].attributes`
+        });
+      }
+
+      // Check attributes keys match declared optionTypes
+      const attrKeys = Object.keys(variant.attributes);
+      if (attrKeys.length !== optionTypes.length) {
+        return res.status(400).json({
+          message: `La variante #${index + 1} doit avoir exactement ${optionTypes.length} attribut(s) (${optionTypes.map(o => o.name).join(', ')})`,
+          field: `variants[${index}].attributes`
+        });
+      }
+
+      for (const opt of optionTypes) {
+        const value = variant.attributes[opt.name];
+        if (!value || typeof value !== 'string') {
+          return res.status(400).json({
+            message: `Valeur manquante ou invalide pour "${opt.name}" dans variante #${index + 1}`,
+            field: `variants[${index}].attributes.${opt.name}`
+          });
+        }
+        if (!opt.values.includes(value)) {
+          return res.status(400).json({
+            message: `Valeur "${value}" non autorisée pour "${opt.name}" (variante #${index + 1})`,
+            field: `variants[${index}].attributes.${opt.name}`
+          });
+        }
+      }
+
+      // Detect duplicate combinations
+      const comboKey = JSON.stringify(variant.attributes, Object.keys(variant.attributes).sort());
+      if (seenCombinations.has(comboKey)) {
+        return res.status(400).json({
+          message: `Combinaison d'attributs dupliquée dans les variantes (variante #${index + 1})`,
+          field: `variants`
+        });
+      }
+      seenCombinations.add(comboKey);
+
+      if (variant.isDefault) {
+        if (defaultVariant) {
+          return res.status(400).json({ message: 'Une seule variante peut être marquée isDefault' });
+        }
+        defaultVariant = variant;
+      }
+    }
+
+    // ───────────────────────────────────────────────
+    //  Generate unique slug
+    // ───────────────────────────────────────────────
     let slug = name
       .toLowerCase()
       .replace(/\s+/g, '-')
-      .replace(/[^\w\-]+/g, '')
-      .replace(/\-\-+/g, '-')
-      .trim();
+      .replace(/[^a-z0-9\-]/g, '')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '');
 
-    let existing = await Product.findOne({ slug });
+    if (!slug) slug = 'produit';
+
     let counter = 1;
-    while (existing) {
-      slug = `${slug}-${counter}`;
-      existing = await Product.findOne({ slug });
-      counter++;
+    let originalSlug = slug;
+    while (await Product.findOne({ slug })) {
+      slug = `${originalSlug}-${counter++}`;
     }
 
-    // Vérifier nom unique
-    existing = await Product.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } });
-    if (existing) {
-      return res.status(409).json({ message: 'Nom de produit déjà utilisé', field: 'name' });
+    // ───────────────────────────────────────────────
+    //  Name uniqueness (case-insensitive)
+    // ───────────────────────────────────────────────
+    if (await Product.findOne({ name: { $regex: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } })) {
+      return res.status(409).json({
+        message: 'Un produit avec ce nom existe déjà',
+        field: 'name'
+      });
     }
 
-    // Calculer basePrice à partir du variant par défaut
-    const defaultVariant = variants.find(v => v.isDefault) || variants[0];
-    const basePrice = defaultVariant.price;
+    // ───────────────────────────────────────────────
+    //  Prepare & save
+    // ───────────────────────────────────────────────
+    const basePrice = defaultVariant?.price ?? variants[0].price;
 
     const productData = {
-      name,
+      name: name.trim(),
       slug,
-      description,
-      basePrice,
-      brand: brand || '',
-      images: images || [],
+      description: description.trim(),
+      brand: brand?.trim() || undefined,
+      images: Array.isArray(images) ? images : [],
+      tags: Array.isArray(tags) ? tags.map(t => t.trim()).filter(Boolean) : [],
+      optionTypes,           // ← saved as-is
       variants,
-      tags: tags || [],
-      isFeatured: isFeatured || false,
+      basePrice,
+      isFeatured: !!isFeatured,
     };
 
     const newProduct = new Product(productData);
@@ -138,15 +266,28 @@ router.post('/', adminOnly, async (req, res) => {
 
     res.status(201).json(newProduct);
   } catch (error) {
+    console.error('Erreur création produit:', error);
+
     if (error.code === 11000) {
-      const field = Object.keys(error.keyValue)[0];
+      const field = Object.keys(error.keyValue || {})[0] || 'inconnu';
       return res.status(409).json({
-        message: `Produit existe déjà (${field})`,
+        message: `Conflit d'unicité sur le champ ${field}`,
         field,
-        value: error.keyValue[field],
       });
     }
-    res.status(500).json({ message: 'Erreur création produit', error: error.message });
+
+    if (error.name === 'ValidationError') {
+      const firstError = Object.values(error.errors)[0];
+      return res.status(400).json({
+        message: firstError?.message || 'Données invalides',
+        field: firstError?.path,
+      });
+    }
+
+    res.status(500).json({
+      message: 'Erreur serveur lors de la création du produit',
+      error: error.message,
+    });
   }
 });
 
