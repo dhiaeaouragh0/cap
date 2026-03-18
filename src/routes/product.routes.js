@@ -45,6 +45,15 @@ router.get('/', async (req, res) => {
       const regex = new RegExp(search, 'i');
       filter.$or = [{ name: regex }, { slug: regex }];
     }
+    if (req.query.model) {
+      filter['variants.attributes.model'] = req.query.model;
+    }
+    if (req.query.color) {
+      filter['variants.attributes.color'] = req.query.color;
+    }
+    if (req.query.size) {
+      filter['variants.attributes.size'] = req.query.size;
+    }
 
     // Compte total (pour pagination)
     const totalProducts = await Product.countDocuments(filter);
